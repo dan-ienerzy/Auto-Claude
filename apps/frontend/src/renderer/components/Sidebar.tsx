@@ -50,6 +50,7 @@ import { AddProjectModal } from './AddProjectModal';
 import { GitSetupModal } from './GitSetupModal';
 import { RateLimitIndicator } from './RateLimitIndicator';
 import { ClaudeCodeStatusBadge } from './ClaudeCodeStatusBadge';
+import { CodexStatusBadge } from './CodexStatusBadge';
 import { UpdateBanner } from './UpdateBanner';
 import type { Project, AutoBuildVersionInfo, GitStatus, ProjectEnvConfig } from '../../shared/types';
 
@@ -336,6 +337,9 @@ export function Sidebar({
         <div className="p-4 space-y-3">
           {/* Claude Code Status Badge */}
           <ClaudeCodeStatusBadge />
+
+          {/* Codex CLI Status Badge */}
+          <CodexStatusBadge />
 
           {/* Settings and Help row */}
           <div className="flex items-center gap-2">

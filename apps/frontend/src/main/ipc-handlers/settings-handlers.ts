@@ -138,7 +138,7 @@ export function registerSettingsHandlers(
       // Fixes issue where Windows paths persisted on macOS (and vice versa)
       // when settings were synced/transferred between platforms
       // See: https://github.com/AndyMik90/Auto-Claude/issues/XXX
-      const pathFields = ['pythonPath', 'gitPath', 'githubCLIPath', 'claudePath', 'autoBuildPath'] as const;
+      const pathFields = ['pythonPath', 'gitPath', 'githubCLIPath', 'claudePath', 'codexPath', 'autoBuildPath'] as const;
       for (const field of pathFields) {
         const pathValue = settings[field];
         if (pathValue && isPathFromWrongPlatform(pathValue)) {
@@ -174,6 +174,7 @@ export function registerSettingsHandlers(
         gitPath: settings.gitPath,
         githubCLIPath: settings.githubCLIPath,
         claudePath: settings.claudePath,
+        codexPath: settings.codexPath,
       });
 
       // Re-warm cache asynchronously after configuring (non-blocking)
@@ -214,13 +215,15 @@ export function registerSettingsHandlers(
           settings.pythonPath !== undefined ||
           settings.gitPath !== undefined ||
           settings.githubCLIPath !== undefined ||
-          settings.claudePath !== undefined
+          settings.claudePath !== undefined ||
+          settings.codexPath !== undefined
         ) {
           configureTools({
             pythonPath: newSettings.pythonPath,
             gitPath: newSettings.gitPath,
             githubCLIPath: newSettings.githubCLIPath,
             claudePath: newSettings.claudePath,
+            codexPath: newSettings.codexPath,
           });
 
           // Re-warm cache asynchronously after configuring (non-blocking)
@@ -260,6 +263,7 @@ export function registerSettingsHandlers(
       git: ReturnType<typeof getToolInfo>;
       gh: ReturnType<typeof getToolInfo>;
       claude: ReturnType<typeof getToolInfo>;
+      codex: ReturnType<typeof getToolInfo>;
     }>> => {
       try {
         return {
@@ -269,6 +273,7 @@ export function registerSettingsHandlers(
             git: getToolInfo('git'),
             gh: getToolInfo('gh'),
             claude: getToolInfo('claude'),
+            codex: getToolInfo('codex'),
           },
         };
       } catch (error) {

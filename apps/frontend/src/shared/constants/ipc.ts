@@ -514,6 +514,14 @@ export const IPC_CHANNELS = {
   CLAUDE_CODE_GET_INSTALLATIONS: 'claudeCode:getInstallations',
   CLAUDE_CODE_SET_ACTIVE_PATH: 'claudeCode:setActivePath',
 
+  // Codex CLI operations
+  CODEX_CHECK_VERSION: 'codex:checkVersion',
+  CODEX_INSTALL: 'codex:install',
+  CODEX_GET_VERSIONS: 'codex:getVersions',
+  CODEX_INSTALL_VERSION: 'codex:installVersion',
+  CODEX_GET_INSTALLATIONS: 'codex:getInstallations',
+  CODEX_SET_ACTIVE_PATH: 'codex:setActivePath',
+
   // MCP Server health checks
   MCP_CHECK_HEALTH: 'mcp:checkHealth',           // Quick connectivity check
   MCP_TEST_CONNECTION: 'mcp:testConnection',     // Full MCP protocol test

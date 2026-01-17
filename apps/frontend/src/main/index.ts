@@ -359,7 +359,7 @@ app.whenReady().then(() => {
   // This ensures CLI detection is done before user needs it
   // Include all commonly used tools to prevent sync blocking on first use
   setImmediate(() => {
-    preWarmToolCache(['claude', 'git', 'gh', 'python']).catch((error) => {
+    preWarmToolCache(['claude', 'codex', 'git', 'gh', 'python']).catch((error) => {
       console.warn('[main] Failed to pre-warm CLI cache:', error);
     });
   });

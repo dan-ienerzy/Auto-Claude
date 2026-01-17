@@ -225,6 +225,7 @@ export interface AppSettings {
   gitPath?: string;
   githubCLIPath?: string;
   claudePath?: string;
+  codexPath?: string;
   autoBuildPath?: string;
   autoUpdateAutoBuild: boolean;
   autoNameTerminals: boolean;

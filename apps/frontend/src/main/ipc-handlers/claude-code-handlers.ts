@@ -304,15 +304,43 @@ async function fetchAvailableVersions(): Promise<string[]> {
 }
 
 /**
+ * Check if a Claude CLI path indicates a Homebrew installation
+ * @param claudePath - Path to the Claude CLI executable
+ */
+function isHomebrewInstallation(claudePath: string | undefined): boolean {
+  if (!claudePath) return false;
+  const lowerPath = claudePath.toLowerCase();
+  return lowerPath.includes('homebrew') || lowerPath.includes('linuxbrew');
+}
+
+/**
+ * Get the brew binary path from a Homebrew-installed Claude path
+ * @param claudePath - Path to the Claude CLI executable (e.g., /home/linuxbrew/.linuxbrew/bin/claude)
+ * @returns Full path to brew binary
+ */
+function getBrewPath(claudePath: string): string {
+  // Claude path is like /home/linuxbrew/.linuxbrew/bin/claude
+  // Brew is in the same bin directory
+  const binDir = path.dirname(claudePath);
+  return path.join(binDir, 'brew');
+}
+
+/**
  * Get the platform-specific install command for a specific version of Claude Code
  * @param version - The version to install (e.g., "1.0.5")
+ * @param claudePath - Optional path to current Claude installation for detecting install method
  */
-function getInstallVersionCommand(version: string): string {
+function getInstallVersionCommand(version: string, claudePath?: string): string {
   if (process.platform === 'win32') {
     // Windows: kill running Claude processes first, then install specific version
     return `taskkill /IM claude.exe /F 2>nul; claude install --force ${version}`;
   } else {
     // macOS/Linux: kill running Claude processes first, then install specific version
+    if (isHomebrewInstallation(claudePath)) {
+      // Homebrew installation - use brew to install specific version
+      // Note: brew doesn't easily support specific versions, fall back to claude install
+      return `pkill -x claude 2>/dev/null; sleep 1; claude install --force ${version}`;
+    }
     return `pkill -x claude 2>/dev/null; sleep 1; claude install --force ${version}`;
   }
 }
@@ -320,8 +348,9 @@ function getInstallVersionCommand(version: string): string {
 /**
  * Get the platform-specific install command for Claude Code
  * @param isUpdate - If true, Claude is already installed and we just need to update
+ * @param claudePath - Optional path to current Claude installation for detecting install method
  */
-function getInstallCommand(isUpdate: boolean): string {
+function getInstallCommand(isUpdate: boolean, claudePath?: string): string {
   if (process.platform === 'win32') {
     if (isUpdate) {
       // Update: kill running Claude processes first, then update with --force
@@ -330,7 +359,15 @@ function getInstallCommand(isUpdate: boolean): string {
     return 'irm https://claude.ai/install.ps1 | iex';
   } else {
     if (isUpdate) {
-      // Update: kill running Claude processes first, then update with --force
+      // Check if this is a Homebrew installation
+      if (isHomebrewInstallation(claudePath) && claudePath) {
+        // Homebrew installation - use full path to brew upgrade
+        // pkill sends SIGTERM to gracefully stop Claude processes
+        // Note: Homebrew package is named 'claude-code', not 'claude'
+        const brewPath = getBrewPath(claudePath);
+        return `pkill -x claude 2>/dev/null; sleep 1; ${brewPath} upgrade claude-code`;
+      }
+      // Non-Homebrew: use claude install --force
       // pkill sends SIGTERM to gracefully stop Claude processes
       return 'pkill -x claude 2>/dev/null; sleep 1; claude install --force latest';
     }
@@ -845,16 +882,18 @@ export function registerClaudeCodeHandlers(): void {
       try {
         // Check if Claude is already installed to determine if this is an update
         let isUpdate = false;
+        let claudePath: string | undefined;
         try {
           const detectionResult = getToolInfo('claude');
           isUpdate = detectionResult.found && !!detectionResult.version;
-          console.log('[Claude Code] Is update:', isUpdate, 'detected version:', detectionResult.version);
+          claudePath = detectionResult.path;
+          console.log('[Claude Code] Is update:', isUpdate, 'detected version:', detectionResult.version, 'path:', claudePath);
         } catch {
           // Detection failed, assume fresh install
           isUpdate = false;
         }
 
-        const command = getInstallCommand(isUpdate);
+        const command = getInstallCommand(isUpdate, claudePath);
         console.log('[Claude Code] Install command:', command);
         console.log('[Claude Code] Opening terminal...');
         await openTerminalWithCommand(command);
@@ -913,8 +952,17 @@ export function registerClaudeCodeHandlers(): void {
           throw new Error(`Invalid version format: ${version}`);
         }
 
-        console.log('[Claude Code] Installing version:', version);
-        const command = getInstallVersionCommand(version);
+        // Get current Claude path to detect installation method
+        let claudePath: string | undefined;
+        try {
+          const detectionResult = getToolInfo('claude');
+          claudePath = detectionResult.path;
+        } catch {
+          // Detection failed, claudePath will be undefined
+        }
+
+        console.log('[Claude Code] Installing version:', version, 'current path:', claudePath);
+        const command = getInstallVersionCommand(version, claudePath);
         console.log('[Claude Code] Install command:', command);
         console.log('[Claude Code] Opening terminal...');
         await openTerminalWithCommand(command);

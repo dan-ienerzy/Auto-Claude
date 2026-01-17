@@ -97,6 +97,7 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
     git: ToolDetectionResult;
     gh: ToolDetectionResult;
     claude: ToolDetectionResult;
+    codex: ToolDetectionResult;
   } | null>(null);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
 
@@ -106,7 +107,7 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
       setIsLoadingTools(true);
       window.electronAPI
         .getCliToolsInfo()
-        .then((result: { success: boolean; data?: { python: ToolDetectionResult; git: ToolDetectionResult; gh: ToolDetectionResult; claude: ToolDetectionResult } }) => {
+        .then((result: { success: boolean; data?: { python: ToolDetectionResult; git: ToolDetectionResult; gh: ToolDetectionResult; claude: ToolDetectionResult; codex: ToolDetectionResult } }) => {
           if (result.success && result.data) {
             setToolsInfo(result.data);
           }
@@ -318,6 +319,24 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
           {!settings.claudePath && (
             <ToolDetectionDisplay
               info={toolsInfo?.claude || null}
+              isLoading={isLoadingTools}
+              t={t}
+            />
+          )}
+        </div>
+        <div className="space-y-3">
+          <Label htmlFor="codexPath" className="text-sm font-medium text-foreground">{t('general.codexPath')}</Label>
+          <p className="text-sm text-muted-foreground">{t('general.codexPathDescription')}</p>
+          <Input
+            id="codexPath"
+            placeholder={t('general.codexPathPlaceholder')}
+            className="w-full max-w-lg"
+            value={settings.codexPath || ''}
+            onChange={(e) => onSettingsChange({ ...settings, codexPath: e.target.value })}
+          />
+          {!settings.codexPath && (
+            <ToolDetectionDisplay
+              info={toolsInfo?.codex || null}
               isLoading={isLoadingTools}
               t={t}
             />

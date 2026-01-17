@@ -74,3 +74,54 @@ export interface ClaudeInstallationList {
   /** Path to the currently active installation (from settings or auto-detected) */
   activePath: string | null;
 }
+
+/**
+ * Codex CLI version information
+ * Used for version checking and update prompts
+ */
+export interface CodexVersionInfo {
+  /** Currently installed version, null if not installed */
+  installed: string | null;
+  /** Latest version available from npm registry */
+  latest: string;
+  /** True if installed version is older than latest */
+  isOutdated: boolean;
+  /** Path to Codex CLI binary if found */
+  path?: string;
+  /** Full detection result with source information */
+  detectionResult: ToolDetectionResult;
+}
+
+/**
+ * Available Codex CLI versions
+ * Used for version rollback feature
+ */
+export interface CodexVersionList {
+  /** List of available versions, sorted newest first */
+  versions: string[];
+}
+
+/**
+ * Information about a detected Codex CLI installation
+ * Used for displaying available installations and allowing user selection
+ */
+export interface CodexInstallationInfo {
+  /** Full path to the Codex CLI executable */
+  path: string;
+  /** Version string if detected, null if validation failed */
+  version: string | null;
+  /** Source of detection (user-config, homebrew, system-path, nvm, etc.) */
+  source: ToolDetectionResult['source'];
+  /** Whether this is the currently active/configured installation */
+  isActive: boolean;
+}
+
+/**
+ * List of all detected Codex CLI installations
+ */
+export interface CodexInstallationList {
+  /** All detected Codex CLI installations */
+  installations: CodexInstallationInfo[];
+  /** Path to the currently active installation (from settings or auto-detected) */
+  activePath: string | null;
+}

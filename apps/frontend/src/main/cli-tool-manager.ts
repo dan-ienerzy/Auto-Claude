@@ -54,7 +54,7 @@ import {
 /**
  * Supported CLI tools managed by this system
  */
-export type CLITool = 'python' | 'git' | 'gh' | 'claude';
+export type CLITool = 'python' | 'git' | 'gh' | 'claude' | 'codex';
 
 /**
  * User configuration for CLI tool paths
@@ -65,6 +65,7 @@ export interface ToolConfig {
   gitPath?: string;
   githubCLIPath?: string;
   claudePath?: string;
+  codexPath?: string;
 }
 
 /**
@@ -180,6 +181,49 @@ export function getClaudeDetectionPaths(homeDir: string): ClaudeDetectionPaths {
     : [
         joinPaths(homeDir, '.local', 'bin', 'claude'),
         joinPaths(homeDir, 'bin', 'claude'),
+      ];
+
+  const nvmVersionsDir = joinPaths(homeDir, '.nvm', 'versions', 'node');
+
+  return { homebrewPaths, platformPaths, nvmVersionsDir };
+}
+
+/**
+ * Configuration for Codex CLI detection paths
+ */
+interface CodexDetectionPaths {
+  /** Homebrew paths for macOS and Linux */
+  homebrewPaths: string[];
+  /** Platform-specific standard installation paths */
+  platformPaths: string[];
+  /** Path to NVM versions directory for Node.js-installed Codex */
+  nvmVersionsDir: string;
+}
+
+/**
+ * Get all candidate paths for Codex CLI detection.
+ *
+ * Returns platform-specific paths where Codex CLI might be installed.
+ *
+ * @param homeDir - User's home directory path
+ * @returns Object containing categorized paths for Codex detection
+ */
+export function getCodexDetectionPaths(homeDir: string): CodexDetectionPaths {
+  const homebrewPaths = [
+    '/opt/homebrew/bin/codex',           // Apple Silicon
+    '/usr/local/bin/codex',              // Intel Mac
+    '/home/linuxbrew/.linuxbrew/bin/codex', // Linux Homebrew
+  ];
+
+  const platformPaths = isWindows()
+    ? [
+        joinPaths(homeDir, 'AppData', 'Local', 'Programs', 'codex', `codex${getExecutableExtension()}`),
+        joinPaths(homeDir, 'AppData', 'Roaming', 'npm', 'codex.cmd'),
+        joinPaths(homeDir, '.local', 'bin', `codex${getExecutableExtension()}`),
+      ]
+    : [
+        joinPaths(homeDir, '.local', 'bin', 'codex'),
+        joinPaths(homeDir, 'bin', 'codex'),
       ];
 
   const nvmVersionsDir = joinPaths(homeDir, '.nvm', 'versions', 'node');
@@ -354,6 +398,8 @@ class CLIToolManager {
         return this.detectGitHubCLI();
       case 'claude':
         return this.detectClaude();
+      case 'codex':
+        return this.detectCodex();
       default:
         return {
           found: false,
@@ -806,6 +852,147 @@ class CLIToolManager {
   }
 
   /**
+   * Detect Codex CLI with multi-level priority
+   *
+   * Priority order:
+   * 1. User configuration (if valid)
+   * 2. Homebrew (macOS/Linux)
+   * 3. System PATH
+   * 4. NVM paths (if installed via npm)
+   * 5. Platform-specific standard locations
+   *
+   * @returns Detection result for Codex CLI
+   */
+  private detectCodex(): ToolDetectionResult {
+    const homeDir = os.homedir();
+    const paths = getCodexDetectionPaths(homeDir);
+
+    // 1. User configuration
+    if (this.userConfig.codexPath) {
+      if (isWrongPlatformPath(this.userConfig.codexPath)) {
+        console.warn(
+          `[Codex CLI] User-configured path is from different platform, ignoring: ${this.userConfig.codexPath}`
+        );
+      } else if (isWindows() && !isSecurePath(this.userConfig.codexPath)) {
+        console.warn(
+          `[Codex CLI] User-configured path failed security validation, ignoring: ${this.userConfig.codexPath}`
+        );
+      } else {
+        const validation = this.validateCodex(this.userConfig.codexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: this.userConfig.codexPath,
+            version: validation.version,
+            source: 'user-config',
+            message: `Using user-configured Codex CLI: ${this.userConfig.codexPath}`,
+          };
+        }
+        console.warn(`[Codex CLI] User-configured path invalid: ${validation.message}`);
+      }
+    }
+
+    // 2. Homebrew (macOS/Linux)
+    for (const codexPath of paths.homebrewPaths) {
+      if (existsSync(codexPath)) {
+        const validation = this.validateCodex(codexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: codexPath,
+            version: validation.version,
+            source: 'homebrew',
+            message: `Using Homebrew Codex CLI: ${codexPath}`,
+          };
+        }
+      }
+    }
+
+    // 3. System PATH (augmented)
+    const systemCodexPath = findExecutable('codex');
+    if (systemCodexPath) {
+      const validation = this.validateCodex(systemCodexPath);
+      if (validation.valid) {
+        return {
+          found: true,
+          path: systemCodexPath,
+          version: validation.version,
+          source: 'system-path',
+          message: `Using system Codex CLI: ${systemCodexPath}`,
+        };
+      }
+    }
+
+    // 4. Windows where.exe detection (Windows only)
+    if (isWindows()) {
+      const whereCodexPath = findWindowsExecutableViaWhere('codex', '[Codex CLI]');
+      if (whereCodexPath) {
+        const validation = this.validateCodex(whereCodexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: whereCodexPath,
+            version: validation.version,
+            source: 'system-path',
+            message: `Using Windows Codex CLI: ${whereCodexPath}`,
+          };
+        }
+      }
+    }
+
+    // 5. NVM paths (Unix only)
+    if (isUnix()) {
+      try {
+        if (existsSync(paths.nvmVersionsDir)) {
+          const nodeVersions = readdirSync(paths.nvmVersionsDir, { withFileTypes: true });
+          const versionNames = sortNvmVersionDirs(nodeVersions);
+
+          for (const versionName of versionNames) {
+            const nvmCodexPath = path.join(paths.nvmVersionsDir, versionName, 'bin', 'codex');
+            if (existsSync(nvmCodexPath)) {
+              const validation = this.validateCodex(nvmCodexPath);
+              if (validation.valid) {
+                return {
+                  found: true,
+                  path: nvmCodexPath,
+                  version: validation.version,
+                  source: 'nvm',
+                  message: `Using NVM Codex CLI: ${nvmCodexPath}`,
+                };
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`[Codex CLI] Unable to read NVM directory: ${error}`);
+      }
+    }
+
+    // 6. Platform-specific standard locations
+    for (const codexPath of paths.platformPaths) {
+      if (existsSync(codexPath)) {
+        const validation = this.validateCodex(codexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: codexPath,
+            version: validation.version,
+            source: 'system-path',
+            message: `Using Codex CLI: ${codexPath}`,
+          };
+        }
+      }
+    }
+
+    // 7. Not found
+    return {
+      found: false,
+      source: 'fallback',
+      message: 'Codex CLI not found. Install from https://openai.com/codex',
+    };
+  }
+
+  /**
    * Validate Python version and availability
    *
    * Checks that Python executable exists and meets minimum version requirement
@@ -998,6 +1185,77 @@ class CLIToolManager {
     }
   }
 
+  /**
+   * Validate Codex CLI version and availability
+   *
+   * @param codexCmd - The Codex command/path to validate
+   * @returns Validation result with version information
+   */
+  private validateCodex(codexCmd: string): ToolValidation {
+    try {
+      const trimmedCmd = codexCmd.trim();
+      const unquotedCmd =
+        trimmedCmd.startsWith('"') && trimmedCmd.endsWith('"')
+          ? trimmedCmd.slice(1, -1)
+          : trimmedCmd;
+
+      const needsShell = shouldUseShell(trimmedCmd);
+      const cmdDir = path.dirname(unquotedCmd);
+      const env = getAugmentedEnv(cmdDir && cmdDir !== '.' ? [cmdDir] : []);
+
+      let version: string;
+
+      if (needsShell) {
+        // For .cmd/.bat files on Windows
+        if (!isSecurePath(unquotedCmd)) {
+          return {
+            valid: false,
+            message: `Codex CLI path failed security validation: ${unquotedCmd}`,
+          };
+        }
+        const cmdExe = process.env.ComSpec
+          || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+        const cmdLine = `""${unquotedCmd}" --version"`;
+        const execOptions: ExecFileSyncOptionsWithVerbatim = {
+          encoding: 'utf-8',
+          timeout: 5000,
+          windowsHide: true,
+          windowsVerbatimArguments: true,
+          env,
+        };
+        version = normalizeExecOutput(
+          execFileSync(cmdExe, ['/d', '/s', '/c', cmdLine], execOptions)
+        ).trim();
+      } else {
+        // For .exe files and non-Windows, use execFileSync
+        version = normalizeExecOutput(
+          execFileSync(unquotedCmd, ['--version'], {
+            encoding: 'utf-8',
+            timeout: 5000,
+            windowsHide: true,
+            shell: false,
+            env,
+          })
+        ).trim();
+      }
+
+      // Codex CLI version output format: "codex-cli X.Y.Z" or similar
+      const match = version.match(/(\d+\.\d+\.\d+)/);
+      const versionStr = match ? match[1] : version.split('\n')[0];
+
+      return {
+        valid: true,
+        version: versionStr,
+        message: `Codex CLI ${versionStr} is available`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: `Failed to validate Codex CLI: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
   // ============================================================================
   // ASYNC METHODS - Non-blocking alternatives for Electron main process
   // ============================================================================
@@ -1050,6 +1308,8 @@ class CLIToolManager {
     switch (tool) {
       case 'claude':
         return this.detectClaudeAsync();
+      case 'codex':
+        return this.detectCodexAsync();
       case 'python':
         return this.detectPythonAsync();
       case 'git':
@@ -1359,6 +1619,209 @@ class CLIToolManager {
       source: 'fallback',
       message: 'Claude CLI not found. Install from https://claude.ai/download',
     };
+  }
+
+  /**
+   * Detect Codex CLI asynchronously (non-blocking)
+   *
+   * Same detection logic as detectCodex but uses async validation.
+   *
+   * @returns Promise resolving to detection result
+   */
+  private async detectCodexAsync(): Promise<ToolDetectionResult> {
+    const homeDir = os.homedir();
+    const paths = getCodexDetectionPaths(homeDir);
+
+    // 1. User configuration
+    if (this.userConfig.codexPath) {
+      if (isWrongPlatformPath(this.userConfig.codexPath)) {
+        console.warn(
+          `[Codex CLI] User-configured path is from different platform, ignoring: ${this.userConfig.codexPath}`
+        );
+      } else if (isWindows() && !isSecurePath(this.userConfig.codexPath)) {
+        console.warn(
+          `[Codex CLI] User-configured path failed security validation, ignoring: ${this.userConfig.codexPath}`
+        );
+      } else {
+        const validation = await this.validateCodexAsync(this.userConfig.codexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: this.userConfig.codexPath,
+            version: validation.version,
+            source: 'user-config',
+            message: `Using user-configured Codex CLI: ${this.userConfig.codexPath}`,
+          };
+        }
+        console.warn(`[Codex CLI] User-configured path invalid: ${validation.message}`);
+      }
+    }
+
+    // 2. Homebrew (macOS/Linux)
+    for (const codexPath of paths.homebrewPaths) {
+      if (await existsAsync(codexPath)) {
+        const validation = await this.validateCodexAsync(codexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: codexPath,
+            version: validation.version,
+            source: 'homebrew',
+            message: `Using Homebrew Codex CLI: ${codexPath}`,
+          };
+        }
+      }
+    }
+
+    // 3. System PATH (augmented) - using async findExecutable
+    const systemCodexPath = await findExecutableAsync('codex');
+    if (systemCodexPath) {
+      const validation = await this.validateCodexAsync(systemCodexPath);
+      if (validation.valid) {
+        return {
+          found: true,
+          path: systemCodexPath,
+          version: validation.version,
+          source: 'system-path',
+          message: `Using system Codex CLI: ${systemCodexPath}`,
+        };
+      }
+    }
+
+    // 4. Windows where.exe detection (async, non-blocking)
+    if (isWindows()) {
+      const whereCodexPath = await findWindowsExecutableViaWhereAsync('codex', '[Codex CLI]');
+      if (whereCodexPath) {
+        const validation = await this.validateCodexAsync(whereCodexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: whereCodexPath,
+            version: validation.version,
+            source: 'system-path',
+            message: `Using Windows Codex CLI: ${whereCodexPath}`,
+          };
+        }
+      }
+    }
+
+    // 5. NVM paths (Unix only)
+    if (isUnix()) {
+      try {
+        if (await existsAsync(paths.nvmVersionsDir)) {
+          const nodeVersions = await fsPromises.readdir(paths.nvmVersionsDir, { withFileTypes: true });
+          const versionNames = sortNvmVersionDirs(nodeVersions);
+
+          for (const versionName of versionNames) {
+            const nvmCodexPath = path.join(paths.nvmVersionsDir, versionName, 'bin', 'codex');
+            if (await existsAsync(nvmCodexPath)) {
+              const validation = await this.validateCodexAsync(nvmCodexPath);
+              if (validation.valid) {
+                return {
+                  found: true,
+                  path: nvmCodexPath,
+                  version: validation.version,
+                  source: 'nvm',
+                  message: `Using NVM Codex CLI: ${nvmCodexPath}`,
+                };
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn(`[Codex CLI] Unable to read NVM directory: ${error}`);
+      }
+    }
+
+    // 6. Platform-specific standard locations
+    for (const codexPath of paths.platformPaths) {
+      if (await existsAsync(codexPath)) {
+        const validation = await this.validateCodexAsync(codexPath);
+        if (validation.valid) {
+          return {
+            found: true,
+            path: codexPath,
+            version: validation.version,
+            source: 'system-path',
+            message: `Using Codex CLI: ${codexPath}`,
+          };
+        }
+      }
+    }
+
+    // 7. Not found
+    return {
+      found: false,
+      source: 'fallback',
+      message: 'Codex CLI not found. Install from https://openai.com/codex',
+    };
+  }
+
+  /**
+   * Validate Codex CLI asynchronously (non-blocking)
+   *
+   * @param codexCmd - The Codex CLI command to validate
+   * @returns Promise resolving to validation result
+   */
+  private async validateCodexAsync(codexCmd: string): Promise<ToolValidation> {
+    try {
+      const trimmedCmd = codexCmd.trim();
+      const unquotedCmd =
+        trimmedCmd.startsWith('"') && trimmedCmd.endsWith('"')
+          ? trimmedCmd.slice(1, -1)
+          : trimmedCmd;
+
+      const needsShell = shouldUseShell(trimmedCmd);
+      const cmdDir = path.dirname(unquotedCmd);
+      const env = await getAugmentedEnvAsync(cmdDir && cmdDir !== '.' ? [cmdDir] : []);
+
+      let version: string;
+
+      if (needsShell) {
+        // For .cmd/.bat files on Windows
+        if (!isSecurePath(unquotedCmd)) {
+          return {
+            valid: false,
+            message: `Codex CLI path failed security validation: ${unquotedCmd}`,
+          };
+        }
+        const cmdExe = process.env.ComSpec
+          || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+        const cmdLine = `""${unquotedCmd}" --version"`;
+        const execOptions: ExecFileAsyncOptionsWithVerbatim = {
+          encoding: 'utf-8',
+          timeout: 5000,
+          windowsHide: true,
+          windowsVerbatimArguments: true,
+          env,
+        };
+        const { stdout } = await execFileAsync(cmdExe, ['/d', '/s', '/c', cmdLine], execOptions);
+        version = normalizeExecOutput(stdout).trim();
+      } else {
+        const { stdout } = await execFileAsync(unquotedCmd, ['--version'], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          windowsHide: true,
+          env,
+        });
+        version = normalizeExecOutput(stdout).trim();
+      }
+
+      // Codex CLI version output format: "codex-cli X.Y.Z" or similar
+      const match = version.match(/(\d+\.\d+\.\d+)/);
+      const versionStr = match ? match[1] : version.split('\n')[0];
+
+      return {
+        valid: true,
+        version: versionStr,
+        message: `Codex CLI ${versionStr} is available`,
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        message: `Failed to validate Codex CLI: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
 
   /**
